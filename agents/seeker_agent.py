@@ -70,10 +70,10 @@ class DumbSeeker(Agent):
             if self.hider_possible_loc.geom_type == 'MultiPolygon':
                 poly = max(list(self.hider_possible_loc.geoms), key= lambda x: x.area) # type: ignore
             else:
-                poly: shapely.Polygon = self.hider_possible_loc # type: ignore
-            
-            cent = poly.centroid
-            self.target = shapely.points(min(poly.exterior.coords, key= lambda x: math.dist((cent.x, cent.y), x)))
+                poly = self.hider_possible_loc
+            if poly.geom_type == 'Polygon' and len(poly.exterior.coords) > 2: # type: ignore
+                cent = poly.centroid
+                self.target = shapely.points(min(poly.exterior.coords, key= lambda x: math.dist((cent.x, cent.y), x))) # type: ignore
 
 
         if state.hider_position is not None:
