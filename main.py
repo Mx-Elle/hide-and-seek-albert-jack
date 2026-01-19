@@ -13,7 +13,7 @@ path_to_src = Path(__file__).parent.parent
 sys.path.insert(0, str(path_to_src))
 
 from Mesh.nav_mesh import NavMesh
-from agents.seeker_agent import DumbSeeker as Seeker
+from agents.seeker_agent import RelativelySmartSeeker as Seeker
 from agent_base import Agent
 from agents.hider_agent import DumbHider as Hider
 from world_state import WorldState
