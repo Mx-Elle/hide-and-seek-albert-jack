@@ -39,6 +39,7 @@ class RelativelySmartSeeker(Agent):
         self.hider_possible_loc: (
             shapely.Point | shapely.Polygon | shapely.MultiPolygon | None
         ) = None  # once hider is seen, create geom of where they could be.
+        self.tried_to_locate_but_lost = 0
 
     def act(
         self, state: WorldState
@@ -78,6 +79,7 @@ class RelativelySmartSeeker(Agent):
             self.hider_possible_loc is not None
             and self.hider_possible_loc.geom_type != "Point"
         ):
+            self.tried_to_locate_but_lost += 1
             if self.hider_possible_loc.geom_type == "MultiPolygon":
                 poly = max(list(self.hider_possible_loc.geoms), key=lambda x: x.area)  # type: ignore
             else:
@@ -87,6 +89,9 @@ class RelativelySmartSeeker(Agent):
                 self.target = shapely.points(min(poly.exterior.coords, key=lambda x: math.dist((cent.x, cent.y), x)))  # type: ignore
             elif self.map.in_bounds(poly.centroid):
                 self.target = poly.centroid
+        if self.tried_to_locate_but_lost >= 150: # it gets stuck with a really small polygon and the bot loses them idk why but if it can't find it, patrol again
+            self.tried_to_locate_but_lost = 0
+            self.hider_possible_loc = None
 
         if state.hider_position is not None:
             self.target = state.hider_position
