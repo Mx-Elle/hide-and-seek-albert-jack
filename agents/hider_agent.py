@@ -22,7 +22,7 @@ class DumbHider(Agent):
 
     def __init__(self, world_map: NavMesh, max_speed: float):
         Agent.__init__(self, world_map, max_speed)
-        self.name = "Dumb Hider"
+        self.name = "Albert Hider"
         self.cell_path: list[NavMeshCell] | None = []
         self.path: list[shapely.Point] = []
         self.new_target = None
@@ -30,33 +30,64 @@ class DumbHider(Agent):
 
     def act(self, state: WorldState) -> tuple[float, float] | None: # TODO: make it so target doesn't continually update by re-adding self.target
         location = state.hider_position
-
-        # get rid of warning
-        if (location is None):
+        
+        # remove warning
+        if location == None:
             return None
 
-        if self.target == None or location == self.target:
-            new_target = self.map.random_position()
-            if (not self.map.polygon.contains(new_target)):
+        cur_cell = self.map.find_cell(location)
+
+        if cur_cell == None:
+            return None
+        
+        safety_rating_map = {}
+
+        line_to_end = shapely.linestrings([(location.x, location.y), (state.seeker_position.x, state.seeker_position.y)])
+        
+        if (not self.path) or (self.target == location) or (location.distance(state.seeker_position) < 100) or self.map.polygon.contains(line_to_end):
+            safety_rating_map = self.dijkstra_map(state)
+
+            # best_cell = cur_cell
+            # max_dist = safety_rating_map.get(cur_cell, 0)
+
+            # for neighbor in cur_cell.neighbors:
+            #     dist_from_seeker = safety_rating_map.get(neighbor, 0)
+            #     if dist_from_seeker > max_dist:
+            #         max_dist = dist_from_seeker
+            #         best_cell = neighbor
+
+            best_cell = None
+            max_val = -1 
+
+            for cell, value in safety_rating_map.items():
+                if value > max_val and len(cell.neighbors) > 1:
+                    max_val = value
+                    best_cell = cell
+
+            if best_cell is None:
                 return None
 
             self.prev_target = self.target
-            self.target = new_target
+            self.target = best_cell.polygon.centroid
             self.path = []
             self.cell_path = []
-        
+
+        if (not self.map.polygon.contains(self.target) or self.target == None):
+            return None
+            
         if self.path != [] and location == self.path[0]:
             self.path.pop(0)
 
         # If target is in sight, move directly to target
+
         line_to_end = shapely.linestrings([(location.x, location.y), (self.target.x, self.target.y)])
         if self.map.polygon.contains(line_to_end):
             self.path = [self.target]
             return self.create_vector(state)
         
-        # if there is no current path, make one
+        # if there is no current path, make one (or emergency retarget)
         if not self.path:
-            self.cell_path = self.astar(location, self.target)
+            self.cell_path = self.astar(state, location, self.target, safety_rating_map)
             if not self.cell_path:
                 return None
 
@@ -65,6 +96,53 @@ class DumbHider(Agent):
             
         if (self.path):
             return self.create_vector(state)
+            
+    def escape_options_modifier(self, cell):
+        neighbors_count = len(cell.neighbors)
+        if neighbors_count == 3:
+            return 1.5  
+        if neighbors_count == 2:
+            return 1.0
+        return 0.1     # corners are bad
+        
+    def dijkstra_map(self, state: WorldState) -> dict[NavMeshCell, float]:
+        # breadth first search
+
+        seeker_pos = state.seeker_position
+        seeker_cell = self.map.find_cell(seeker_pos)
+
+        # remove error
+        if seeker_cell == None:
+            return {}
+        
+        # cell_val stores: {cell: distance}
+        cell_val = {seeker_cell: 0.0}
+        frontier = [(0.0, random.random(),seeker_cell)] # (distance, cell)
+
+        while frontier:
+            current_dist, tiebreak, current_cell = heapq.heappop(frontier)
+
+            if current_cell == None: #remove error
+                continue
+
+            if current_dist > cell_val.get(current_cell, float('inf')):
+                continue
+
+            for neighbor in current_cell.neighbors:
+                # Distance from seeker to this neighbor
+                edge_dist = current_cell.distance(neighbor)
+
+                modifier = self.escape_options_modifier(neighbor)
+                modified_dist = modifier*edge_dist
+                # print(f"modifier:{modifier}")
+
+                total_dist = modified_dist + current_dist
+
+                if total_dist < cell_val.get(neighbor, float('inf')):
+                    cell_val[neighbor] = total_dist
+                    heapq.heappush(frontier, (total_dist, random.random(), neighbor))
+
+        return cell_val
 
 
     # Create next vector from current location towards next point in self.path
@@ -87,7 +165,7 @@ class DumbHider(Agent):
         return val
     
     def funnel_path(self, target, state: WorldState) -> None:
-        print("funnel path")
+        # print("funnel path")
         location = state.hider_position
 
         if self.cell_path is None: # Should never be None but it clears error
@@ -172,7 +250,7 @@ class DumbHider(Agent):
         self.path = path
         return None
 
-    def astar(self, start_point: shapely.Point, end_point: shapely.Point) -> list[NavMeshCell] | None: 
+    def astar(self, state: WorldState, start_point: shapely.Point, end_point: shapely.Point, safety_map: dict) -> list[NavMeshCell] | None: 
         if (not self.map.polygon.contains(end_point)):
             return None
         
@@ -201,7 +279,16 @@ class DumbHider(Agent):
 
             for neighbor in curr.neighbors:
                 tie_break += 1
-                new_cost: float = g_scores[curr] + neighbor.distance(curr)
+
+                safety_val = safety_map.get(neighbor, 1000)
+                danger_penalty = 100000 / (safety_val + 0.1)
+
+                line_to_end = shapely.linestrings([(neighbor.polygon.centroid.x, neighbor.polygon.centroid.y), (state.seeker_position.x, state.seeker_position.y)])
+                if self.map.polygon.contains(line_to_end):
+                    danger_penalty += 1000000
+
+                print(danger_penalty)
+                new_cost: float = g_scores[curr] + neighbor.distance(curr) + danger_penalty
 
                 if new_cost < g_scores[neighbor]:
                     heapq.heappush(frontier, (new_cost + neighbor.distance(end_cell), tie_break, neighbor)) 
