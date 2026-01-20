@@ -287,7 +287,7 @@ class DumbHider(Agent):
                 if self.map.polygon.contains(line_to_end):
                     danger_penalty += 1000000
 
-                print(danger_penalty)
+                # print(danger_penalty)
                 new_cost: float = g_scores[curr] + neighbor.distance(curr) + danger_penalty
 
                 if new_cost < g_scores[neighbor]:
